@@ -34,7 +34,7 @@ EXPOSE 3000
 
 # healthcheck using node (exec form)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD ["node", "-e", "require('http').get('http://127.0.0.1:3000', ()=>process.exit(0)).on('error', ()=>process.exit(1))"]
+  CMD ["/node", "-e", "require('http').get('http://127.0.0.1:3000', ()=>process.exit(0)).on('error', ()=>process.exit(1))"]
 
-# entrypoint — PairDrop main entry
-ENTRYPOINT ["node", "dist/index.js"]
+# ENTRYPOINT with absolute path to node binary
+ENTRYPOINT ["/node", "dist/index.js"]
