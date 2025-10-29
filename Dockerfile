@@ -33,4 +33,4 @@ ENV NODE_ENV=production
 EXPOSE 3000
 
 # ENTRYPOINT — just provide the JS file, Node is already the default
-ENTRYPOINT ["dist/index.js"]
+ENTRYPOINT ["server/index.js"]
