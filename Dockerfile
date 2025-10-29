@@ -25,12 +25,13 @@ ENV NODE_ENV=production
 # Install production deps
 RUN npm ci --only=production
 
-# If the project has a build script, run it (safe no-op if none)
+# If project has a build script, run it
 RUN if grep -q "\"build\"" package.json 2>/dev/null; then npm run build; fi
 
 # Create a small JS bootstrap to detect and require the correct entry file at runtime.
-# This avoids hardcoding a single index path and prevents errors like "Cannot find module '/app/node'".
-RUN cat > /app/run.js <<'RUNJS'\n#!/usr/bin/env node
+# NOTE: the heredoc terminator below (RUNJS) MUST be at the start of the line with NO leading spaces.
+RUN cat > /app/run.js <<'RUNJS'
+#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const appDir = __dirname;
@@ -39,8 +40,7 @@ try {
   const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
   if (pkg.main) main = pkg.main;
   else if (pkg.scripts && pkg.scripts.start) {
-    // try to pull a "node <file>" from the start script
-    const m = pkg.scripts.start.match(/node\\s+([^\\s]+)/);
+    const m = pkg.scripts.start.match(/node\s+([^\s]+)/);
     if (m) main = m[1];
   }
 } catch (e) {
@@ -59,20 +59,18 @@ if (!found) {
 require(found);
 RUNJS
 
-# Keep files tidy
+# Clean caches
 RUN rm -rf /root/.npm /root/.cache /tmp/*
 
 ############################################
 # Final stage: small runtime (distroless)
 ############################################
-FROM gcr.io/distroless/nodejs:20
+FROM gcr.io/distroless/nodejs20-debian12:latest
 WORKDIR /app
 
 # Copy only the app & production deps from builder
 COPY --from=builder /app /app
 
-# Expose the same port as before
 EXPOSE 3000
 
-# Use node to run our bootstrap; it will require the proper entry file
 CMD ["node", "/app/run.js"]
