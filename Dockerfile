@@ -23,7 +23,7 @@ RUN npm run build --if-present
 RUN rm -rf .git tests docs .github *.md || true
 
 # -------- runtime (distroless) --------
-FROM gcr.io/distroless/nodejs20-debian12:nonroot
+FROM gcr.io/distroless/nodejs20-debian12:latest
 WORKDIR /app
 
 # copy app + node_modules from builder
