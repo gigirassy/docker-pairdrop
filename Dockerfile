@@ -29,6 +29,16 @@ WORKDIR /app
 # copy app + node_modules from builder
 COPY --from=builder /usr/src/app /app
 
+# -------- runtime (distroless) --------
+FROM gcr.io/distroless/nodejs20-debian12:nonroot
+WORKDIR /app
+
+# copy app + node_modules from builder
+COPY --from=builder /usr/src/app /app
+
+# Fix permissions so non-root can read files
+RUN chmod -R a+r /app
+
 ENV NODE_ENV=production
 EXPOSE 3000
 
