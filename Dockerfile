@@ -37,7 +37,7 @@ RUN rm -rf /root/.npm /root/.cache /tmp/*
 ############################################
 # Final: distroless node runtime (minimal)
 ############################################
-FROM gcr.io/distroless/nodejs:20
+FROM gcr.io/distroless/nodejs24-debian12:latest
 
 # create app dir in final image
 WORKDIR /app
