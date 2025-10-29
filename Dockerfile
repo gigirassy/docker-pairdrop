@@ -16,31 +16,26 @@ RUN if [ -f package-lock.json ]; then \
     fi \
  && npm cache clean --force
 
-# optional build step (if TS / bundler)
+# optional build step (TypeScript, bundler, etc.)
 RUN npm run build --if-present
 
 # remove unnecessary files
 RUN rm -rf .git tests docs .github *.md || true
 
-# -------- runtime (distroless) --------
-FROM gcr.io/distroless/nodejs20-debian12:latest
-WORKDIR /app
+# fix permissions so non-root user in distroless can read
+RUN chmod -R a+rX /usr/src/app
 
-# copy app + node_modules from builder
-COPY --from=builder /usr/src/app /app
 
 # -------- runtime (distroless) --------
 FROM gcr.io/distroless/nodejs20-debian12:nonroot
 WORKDIR /app
 
-# copy app + node_modules from builder
+# copy app + node_modules from builder (already correct permissions)
 COPY --from=builder /usr/src/app /app
-
-# Fix permissions so non-root can read files
-RUN chmod -R a+r /app
 
 ENV NODE_ENV=production
 EXPOSE 3000
 
-# ENTRYPOINT — just provide the JS file, Node is already the default
+# ENTRYPOINT — adjust to PairDrop main file
 ENTRYPOINT ["server/index.js"]
+
