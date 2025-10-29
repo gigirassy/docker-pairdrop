@@ -27,7 +27,7 @@ RUN chmod -R a+rX /usr/src/app
 
 
 # -------- runtime (distroless) --------
-FROM gcr.io/distroless/nodejs20-debian12:nonroot
+FROM gcr.io/distroless/nodejs20-debian12:latest
 WORKDIR /app
 
 # copy app + node_modules from builder (already correct permissions)
