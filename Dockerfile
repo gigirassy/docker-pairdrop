@@ -15,10 +15,8 @@ WORKDIR /app
 RUN if [ -z "$PAIRDROP_RELEASE" ]; then \
       PAIRDROP_RELEASE=$(curl -sL "https://api.github.com/repos/schlagmichdoch/PairDrop/tags" | jq -r '.[0].name'); \
     fi && \
-    echo "Using release: $PAIRDROP_RELEASE" && \
-    curl -L "https://github.com/schlagmichdoch/PairDrop/archive/refs/tags/${PAIRDROP_RELEASE}.tar.gz" -o /tmp/pairdrop.tar.gz && \
-    tar xf /tmp/pairdrop.tar.gz --strip-components=1 -C /app && \
-    rm /tmp/pairdrop.tar.gz
+    curl -sL "https://github.com/schlagmichdoch/PairDrop/archive/refs/tags/${PAIRDROP_RELEASE}.tar.gz" -o /tmp/pairdrop.tar.gz && \
+    tar xf /tmp/pairdrop.tar.gz --strip-components=1 -C /app && rm /tmp/pairdrop.tar.gz
 
 ENV NODE_ENV=production
 
@@ -28,38 +26,57 @@ RUN npm ci --only=production
 # If project has a build script, run it
 RUN if grep -q "\"build\"" package.json 2>/dev/null; then npm run build; fi
 
-# Create a small JS bootstrap to detect and require the correct entry file at runtime.
-# NOTE: the heredoc terminator below (RUNJS) MUST be at the start of the line with NO leading spaces.
+# Strict bootstrap: ignore absolute paths or paths resolving outside /app
 RUN cat > /app/run.js <<'RUNJS'
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const appDir = __dirname;
-let main;
+
+function isInsideApp(resolved) {
+  const appResolved = path.resolve(appDir) + path.sep;
+  const r = path.resolve(resolved);
+  return r === path.resolve(appDir) || r.startsWith(appResolved);
+}
+
+let candidateFile = null;
 try {
-  const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
-  if (pkg.main) main = pkg.main;
-  else if (pkg.scripts && pkg.scripts.start) {
-    const m = pkg.scripts.start.match(/node\s+([^\s]+)/);
-    if (m) main = m[1];
+  const pkgPath = path.join(appDir, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    if (pkg.main) {
+      const mainResolved = path.resolve(appDir, pkg.main);
+      if (isInsideApp(mainResolved) && fs.existsSync(mainResolved)) candidateFile = mainResolved;
+    }
+    // Only consider scripts.start if we didn't already find main
+    if (!candidateFile && pkg.scripts && pkg.scripts.start) {
+      const m = pkg.scripts.start.match(/node\s+([^\s]+)/);
+      if (m) {
+        const cmdPath = m[1];
+        // Ignore absolute paths (like /app/node) or external paths
+        if (!path.isAbsolute(cmdPath)) {
+          const resolved = path.resolve(appDir, cmdPath);
+          if (isInsideApp(resolved) && fs.existsSync(resolved)) candidateFile = resolved;
+        }
+      }
+    }
   }
 } catch (e) {
   // ignore parse errors
 }
-const candidates = [main, 'index.js', 'server.js', 'app.js'].filter(Boolean);
-let found = null;
-for (const c of candidates) {
-  const p = path.join(appDir, c);
-  if (fs.existsSync(p)) { found = p; break; }
-}
+
+const fallbacks = ['index.js', 'server.js', 'app.js'].map(f => path.join(appDir, f));
+let found = candidateFile || fallbacks.find(p => fs.existsSync(p)) || null;
+
 if (!found) {
-  console.error('No entry file found. Tried:', candidates);
+  console.error('No entry file found. Tried candidate from package.json and:', [candidateFile, ...fallbacks]);
   process.exit(1);
 }
+
 require(found);
 RUNJS
 
-# Clean caches
+# remove build caches
 RUN rm -rf /root/.npm /root/.cache /tmp/*
 
 ############################################
@@ -67,10 +84,6 @@ RUN rm -rf /root/.npm /root/.cache /tmp/*
 ############################################
 FROM gcr.io/distroless/nodejs20-debian12:latest
 WORKDIR /app
-
-# Copy only the app & production deps from builder
 COPY --from=builder /app /app
-
 EXPOSE 3000
-
 CMD ["node", "/app/run.js"]
