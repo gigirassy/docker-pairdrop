@@ -1,19 +1,17 @@
 # syntax=docker/dockerfile:1
 ############################################
-# Builder: fetch repo, install deps, build
+# Builder stage: fetch repo, deps, build
 ############################################
 FROM node:20-alpine AS builder
 ARG PAIRDROP_RELEASE
 ARG BUILD_DATE
 ARG VERSION
 
-# Install tools for fetching tags/releases
-RUN apk add --no-cache curl tar jq bash
+RUN apk add --no-cache curl tar jq
 
 WORKDIR /app
 
-# Fetch PairDrop release (if PAIRDROP_RELEASE is empty, pick latest tag)
-# Note: this runs at build-time; if you pass PAIRDROP_RELEASE as a build-arg it will use that.
+# Fetch PairDrop release (use PAIRDROP_RELEASE if provided, otherwise latest tag)
 RUN if [ -z "$PAIRDROP_RELEASE" ]; then \
       PAIRDROP_RELEASE=$(curl -sL "https://api.github.com/repos/schlagmichdoch/PairDrop/tags" | jq -r '.[0].name'); \
     fi && \
@@ -22,33 +20,59 @@ RUN if [ -z "$PAIRDROP_RELEASE" ]; then \
     tar xf /tmp/pairdrop.tar.gz --strip-components=1 -C /app && \
     rm /tmp/pairdrop.tar.gz
 
-# Install production dependencies only
 ENV NODE_ENV=production
-# If the repo contains package-lock.json or npm-shrinkwrap, npm ci will be deterministic
+
+# Install production deps
 RUN npm ci --only=production
 
-# Optional: run a build if package.json has a build script
-# This will run only if "build" appears in package.json scripts
+# If the project has a build script, run it (safe no-op if none)
 RUN if grep -q "\"build\"" package.json 2>/dev/null; then npm run build; fi
 
-# Make sure only needed files are in /app (clean caches)
+# Create a small JS bootstrap to detect and require the correct entry file at runtime.
+# This avoids hardcoding a single index path and prevents errors like "Cannot find module '/app/node'".
+RUN cat > /app/run.js <<'RUNJS'\n#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+const appDir = __dirname;
+let main;
+try {
+  const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'));
+  if (pkg.main) main = pkg.main;
+  else if (pkg.scripts && pkg.scripts.start) {
+    // try to pull a "node <file>" from the start script
+    const m = pkg.scripts.start.match(/node\\s+([^\\s]+)/);
+    if (m) main = m[1];
+  }
+} catch (e) {
+  // ignore parse errors
+}
+const candidates = [main, 'index.js', 'server.js', 'app.js'].filter(Boolean);
+let found = null;
+for (const c of candidates) {
+  const p = path.join(appDir, c);
+  if (fs.existsSync(p)) { found = p; break; }
+}
+if (!found) {
+  console.error('No entry file found. Tried:', candidates);
+  process.exit(1);
+}
+require(found);
+RUNJS
+
+# Keep files tidy
 RUN rm -rf /root/.npm /root/.cache /tmp/*
 
 ############################################
-# Final: distroless node runtime (minimal)
+# Final stage: small runtime (distroless)
 ############################################
-FROM gcr.io/distroless/nodejs24-debian12:latest
-
-# create app dir in final image
+FROM gcr.io/distroless/nodejs:20
 WORKDIR /app
 
-# Copy production node_modules and app files from builder
+# Copy only the app & production deps from builder
 COPY --from=builder /app /app
 
-# The distroless image runs as non-root; expose port same as before
+# Expose the same port as before
 EXPOSE 3000
 
-# Provide an opinionated default command:
-# - prefer start script if present, otherwise fallback to main or index.js
-# Adjust the final JSON entry below if your app's entry is different.
-CMD ["node", "/app/index.js"]
+# Use node to run our bootstrap; it will require the proper entry file
+CMD ["node", "/app/run.js"]
