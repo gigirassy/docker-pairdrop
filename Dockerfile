@@ -32,9 +32,5 @@ COPY --from=builder /usr/src/app /app
 ENV NODE_ENV=production
 EXPOSE 3000
 
-# healthcheck using node (exec form)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD ["/node", "-e", "require('http').get('http://127.0.0.1:3000', ()=>process.exit(0)).on('error', ()=>process.exit(1))"]
-
-# ENTRYPOINT with absolute path to node binary
-ENTRYPOINT ["/node", "dist/index.js"]
+# ENTRYPOINT — just provide the JS file, Node is already the default
+ENTRYPOINT ["dist/index.js"]
